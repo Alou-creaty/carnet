@@ -113,6 +113,76 @@ function App() {
   }, [darkMode]);
 
   /* =========================
+     RAPPEL DES TÂCHES
+     TEST : 10 SECONDES
+  ========================= */
+
+  useEffect(() => {
+    if (!user) return;
+
+    if (!("Notification" in window)) {
+      console.log(
+        "Les notifications ne sont pas supportées par ce navigateur.",
+      );
+      return;
+    }
+
+    const unfinishedTasks = tasks.filter((task) => !task.done);
+
+    if (unfinishedTasks.length === 0) return;
+
+    let timer;
+
+    const sendReminder = () => {
+      const count = unfinishedTasks.length;
+
+      const message =
+        count === 1
+          ? "Il vous reste 1 tâche à accomplir aujourd'hui."
+          : `Il vous reste ${count} tâches à accomplir aujourd'hui.`;
+
+      if (Notification.permission === "granted") {
+        new Notification("Carnet", {
+          body: message,
+          icon: "/icon-192.png",
+        });
+      }
+    };
+
+    const requestPermissionAndSchedule = async () => {
+      let permission = Notification.permission;
+
+      if (permission === "default") {
+        permission = await Notification.requestPermission();
+      }
+
+      if (permission !== "granted") {
+        console.log("Permission de notification refusée.");
+        return;
+      }
+
+      /*
+        TEST :
+
+        La notification apparaît 10 secondes
+        après que les tâches ont été récupérées.
+      */
+
+      timer = setTimeout(() => {
+        sendReminder();
+      }, 10000);
+    };
+
+    requestPermissionAndSchedule();
+
+    return () => {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
+  }, [user, tasks]);
+
+  /* =========================
      VÉRIFIER SI UNE DATE EST AUJOURD'HUI
   ========================= */
 
@@ -172,9 +242,7 @@ function App() {
     try {
       await updateDoc(taskRef, {
         done: !task.done,
-
         completedAt: !task.done ? new Date().toISOString() : null,
-
         updatedAt: serverTimestamp(),
       });
     } catch (error) {
@@ -232,13 +300,6 @@ function App() {
      TÂCHES DE LA JOURNÉE
   ========================= */
 
-  // Sur l'accueil :
-  //
-  // - Toutes les tâches non terminées restent visibles.
-  // - Les tâches terminées aujourd'hui restent visibles.
-  // - Les tâches terminées les jours précédents
-  //   sont déplacées vers l'historique.
-
   const homeTasks = tasks.filter(
     (task) => !task.done || isToday(task.completedAt),
   );
@@ -281,12 +342,6 @@ function App() {
   /* =========================
      HISTORIQUE
   ========================= */
-
-  // Une tâche terminée aujourd'hui
-  // reste sur l'accueil.
-  //
-  // Une tâche terminée avant aujourd'hui
-  // apparaît dans l'historique.
 
   const historyTasks = tasks.filter(
     (task) => task.done && task.completedAt && !isToday(task.completedAt),
@@ -342,9 +397,7 @@ function App() {
 
   return (
     <div className="app">
-      {/* =========================
-          HEADER
-      ========================= */}
+      {/* HEADER */}
 
       <header className="app-header">
         <div className="brand">
@@ -371,10 +424,6 @@ function App() {
           {darkMode ? <Sun size={20} /> : <Moon size={20} />}
         </button>
       </header>
-
-      {/* =========================
-          CONTENU PRINCIPAL
-      ========================= */}
 
       <main className="main-content">
         {/* =========================
@@ -482,7 +531,7 @@ function App() {
               )}
             </section>
 
-            {/* TÂCHES TERMINÉES AUJOURD'HUI */}
+            {/* TÂCHES TERMINÉES */}
 
             {completedFilteredTasks.length > 0 && (
               <section className="tasks-section">
@@ -643,9 +692,7 @@ function App() {
         )}
       </main>
 
-      {/* =========================
-          NAVIGATION
-      ========================= */}
+      {/* NAVIGATION */}
 
       <nav className="bottom-nav">
         <button

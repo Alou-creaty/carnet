@@ -42,7 +42,7 @@ Lorsque la connexion revient, les modifications sont automatiquement synchronis√
 ### Installation du projet
 
 ```bash
-git clone https://github.com/VOTRE_USERNAME/carnet.git
+git clone https://github.com/Alou-creaty/carnet.git
 cd carnet
 npm install
 ```
