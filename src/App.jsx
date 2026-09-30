@@ -9,6 +9,9 @@ import {
   Moon,
   LogOut,
   Check,
+  ChevronLeft,
+  ChevronRight,
+  CalendarDays,
 } from "lucide-react";
 
 import TaskItem from "./components/TaskItem";
@@ -46,6 +49,26 @@ function App() {
 
   const [showAddTask, setShowAddTask] = useState(false);
   const [newTaskText, setNewTaskText] = useState("");
+
+  const [historyWeekStart, setHistoryWeekStart] = useState(() => {
+    const date = new Date();
+    const day = date.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() + diff);
+
+    return date;
+  });
+
+  const [selectedHistoryDate, setSelectedHistoryDate] = useState(() => {
+    const date = new Date();
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+
+    return `${year}-${month}-${day}`;
+  });
 
   /* =========================
      AUTHENTIFICATION
@@ -113,73 +136,47 @@ function App() {
   }, [darkMode]);
 
   /* =========================
-     RAPPEL DES TÂCHES
-     TEST : 10 SECONDES
+     NOTIFICATION DE RAPPEL
   ========================= */
 
   useEffect(() => {
     if (!user) return;
 
-    if (!("Notification" in window)) {
-      console.log(
-        "Les notifications ne sont pas supportées par ce navigateur.",
-      );
-      return;
-    }
+    if (!("Notification" in window)) return;
 
     const unfinishedTasks = tasks.filter((task) => !task.done);
 
     if (unfinishedTasks.length === 0) return;
 
-    let timer;
+    let timeoutId;
 
-    const sendReminder = () => {
+    const sendNotification = () => {
       const count = unfinishedTasks.length;
 
-      const message =
-        count === 1
-          ? "Il vous reste 1 tâche à accomplir aujourd'hui."
-          : `Il vous reste ${count} tâches à accomplir aujourd'hui.`;
-
-      if (Notification.permission === "granted") {
-        new Notification("Carnet", {
-          body: message,
-          icon: "/icon-192.png",
-        });
-      }
+      new Notification("Carnet", {
+        body:
+          count === 1
+            ? "Il vous reste 1 tâche à accomplir aujourd'hui."
+            : `Il vous reste ${count} tâches à accomplir aujourd'hui.`,
+        icon: "/icon-192.png",
+      });
     };
 
-    const requestPermissionAndSchedule = async () => {
-      let permission = Notification.permission;
-
-      if (permission === "default") {
-        permission = await Notification.requestPermission();
-      }
-
-      if (permission !== "granted") {
-        console.log("Permission de notification refusée.");
-        return;
-      }
-
-      /*
-        TEST :
-
-        La notification apparaît 10 secondes
-        après que les tâches ont été récupérées.
-      */
-
-      timer = setTimeout(() => {
-        sendReminder();
-      }, 10000);
+    const scheduleNotification = () => {
+      timeoutId = setTimeout(sendNotification, 10000);
     };
 
-    requestPermissionAndSchedule();
+    if (Notification.permission === "default") {
+      Notification.requestPermission().then((permission) => {
+        if (permission === "granted") {
+          scheduleNotification();
+        }
+      });
+    } else if (Notification.permission === "granted") {
+      scheduleNotification();
+    }
 
-    return () => {
-      if (timer) {
-        clearTimeout(timer);
-      }
-    };
+    return () => clearTimeout(timeoutId);
   }, [user, tasks]);
 
   /* =========================
@@ -242,7 +239,9 @@ function App() {
     try {
       await updateDoc(taskRef, {
         done: !task.done,
+
         completedAt: !task.done ? new Date().toISOString() : null,
+
         updatedAt: serverTimestamp(),
       });
     } catch (error) {
@@ -300,6 +299,13 @@ function App() {
      TÂCHES DE LA JOURNÉE
   ========================= */
 
+  // Sur l'accueil :
+  //
+  // - Toutes les tâches non terminées restent visibles.
+  // - Les tâches terminées aujourd'hui restent visibles.
+  // - Les tâches terminées les jours précédents
+  //   sont déplacées vers l'historique.
+
   const homeTasks = tasks.filter(
     (task) => !task.done || isToday(task.completedAt),
   );
@@ -343,6 +349,12 @@ function App() {
      HISTORIQUE
   ========================= */
 
+  // Une tâche terminée aujourd'hui
+  // reste sur l'accueil.
+  //
+  // Une tâche terminée avant aujourd'hui
+  // apparaît dans l'historique.
+
   const historyTasks = tasks.filter(
     (task) => task.done && task.completedAt && !isToday(task.completedAt),
   );
@@ -358,6 +370,99 @@ function App() {
 
     return groups;
   }, {});
+
+  /* =========================
+     CALENDRIER DE L'HISTORIQUE
+  ========================= */
+
+  const getDateKey = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+
+    return `${year}-${month}-${day}`;
+  };
+
+  const getWeekDays = (weekStart) => {
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(weekStart);
+      date.setDate(weekStart.getDate() + index);
+      return date;
+    });
+  };
+
+  const historyWeekDays = getWeekDays(historyWeekStart);
+
+  const getDayCompletedTasks = (date) => {
+    const dateKey = getDateKey(date);
+
+    return tasks.filter(
+      (task) =>
+        task.done &&
+        task.completedAt &&
+        getDateKey(new Date(task.completedAt)) === dateKey,
+    );
+  };
+
+  const getDayProgress = (date) => {
+    const dateKey = getDateKey(date);
+
+    const completed = getDayCompletedTasks(date).length;
+
+    const unfinishedCreatedThatDay = tasks.filter((task) => {
+      if (task.done || !task.createdAt) return false;
+
+      const createdDate =
+        task.createdAt?.toDate?.() || new Date(task.createdAt);
+
+      return getDateKey(createdDate) === dateKey;
+    }).length;
+
+    const total = completed + unfinishedCreatedThatDay;
+
+    return total === 0 ? 0 : Math.round((completed / total) * 100);
+  };
+
+  const selectedHistoryTasks = tasks.filter(
+    (task) =>
+      task.done &&
+      task.completedAt &&
+      getDateKey(new Date(task.completedAt)) === selectedHistoryDate,
+  );
+
+  const selectedHistoryDateObject = new Date(`${selectedHistoryDate}T12:00:00`);
+
+  const selectedHistoryDateLabel = selectedHistoryDateObject.toLocaleDateString(
+    "fr-FR",
+    {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    },
+  );
+
+  const historyWeekLabel = (() => {
+    const first = historyWeekDays[0];
+    const last = historyWeekDays[6];
+
+    if (first.getMonth() === last.getMonth()) {
+      return `${first.getDate()} – ${last.getDate()} ${last.toLocaleDateString("fr-FR", { month: "long", year: "numeric" })}`;
+    }
+
+    return `${first.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })} – ${last.toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })}`;
+  })();
+
+  const changeHistoryWeek = (amount) => {
+    const newStart = new Date(historyWeekStart);
+    newStart.setDate(newStart.getDate() + amount * 7);
+
+    const newSelectedDate = new Date(selectedHistoryDateObject);
+    newSelectedDate.setDate(newSelectedDate.getDate() + amount * 7);
+
+    setHistoryWeekStart(newStart);
+    setSelectedHistoryDate(getDateKey(newSelectedDate));
+  };
 
   /* =========================
      CHARGEMENT
@@ -397,7 +502,9 @@ function App() {
 
   return (
     <div className="app">
-      {/* HEADER */}
+      {/* =========================
+          HEADER
+      ========================= */}
 
       <header className="app-header">
         <div className="brand">
@@ -424,6 +531,10 @@ function App() {
           {darkMode ? <Sun size={20} /> : <Moon size={20} />}
         </button>
       </header>
+
+      {/* =========================
+          CONTENU PRINCIPAL
+      ========================= */}
 
       <main className="main-content">
         {/* =========================
@@ -531,7 +642,7 @@ function App() {
               )}
             </section>
 
-            {/* TÂCHES TERMINÉES */}
+            {/* TÂCHES TERMINÉES AUJOURD'HUI */}
 
             {completedFilteredTasks.length > 0 && (
               <section className="tasks-section">
@@ -625,32 +736,134 @@ function App() {
               <p>Retrouvez ici les tâches que vous avez complétées.</p>
             </div>
 
-            {Object.keys(groupedHistory).length === 0 ? (
+            {/* CALENDRIER */}
+
+            <section className="history-calendar">
+              <div className="history-calendar-header">
+                <button
+                  className="history-calendar-arrow"
+                  onClick={() => changeHistoryWeek(-1)}
+                  aria-label="Semaine précédente"
+                >
+                  <ChevronLeft size={19} />
+                </button>
+
+                <div className="history-calendar-title">
+                  <CalendarDays size={17} />
+                  <span>{historyWeekLabel}</span>
+                </div>
+
+                <button
+                  className="history-calendar-arrow"
+                  onClick={() => changeHistoryWeek(1)}
+                  aria-label="Semaine suivante"
+                >
+                  <ChevronRight size={19} />
+                </button>
+              </div>
+
+              <div className="history-calendar-days">
+                {historyWeekDays.map((date) => {
+                  const dateKey = getDateKey(date);
+                  const progress = getDayProgress(date);
+                  const completedCount = getDayCompletedTasks(date).length;
+                  const isSelected = dateKey === selectedHistoryDate;
+                  const isCurrentDay = dateKey === getDateKey(new Date());
+
+                  const circumference = 2 * Math.PI * 22;
+                  const offset =
+                    circumference - (progress / 100) * circumference;
+
+                  return (
+                    <button
+                      className={`history-calendar-day ${
+                        isSelected ? "selected" : ""
+                      } ${isCurrentDay ? "today" : ""}`}
+                      key={dateKey}
+                      onClick={() => setSelectedHistoryDate(dateKey)}
+                      aria-label={`Voir le ${date.toLocaleDateString("fr-FR", {
+                        weekday: "long",
+                        day: "numeric",
+                        month: "long",
+                      })}`}
+                    >
+                      <span className="history-calendar-weekday">
+                        {date
+                          .toLocaleDateString("fr-FR", {
+                            weekday: "short",
+                          })
+                          .replace(".", "")
+                          .charAt(0)
+                          .toUpperCase()}
+                      </span>
+
+                      <span className="history-calendar-circle">
+                        <svg viewBox="0 0 52 52" aria-hidden="true">
+                          <circle
+                            className="history-calendar-circle-bg"
+                            cx="26"
+                            cy="26"
+                            r="22"
+                          />
+
+                          <circle
+                            className="history-calendar-circle-progress"
+                            cx="26"
+                            cy="26"
+                            r="22"
+                            style={{
+                              strokeDasharray: circumference,
+                              strokeDashoffset: offset,
+                            }}
+                          />
+                        </svg>
+
+                        <strong>{date.getDate()}</strong>
+                      </span>
+
+                      <span className="history-calendar-count">
+                        {completedCount > 0 ? completedCount : ""}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+
+            {/* JOUR SÉLECTIONNÉ */}
+
+            <div className="history-selected-heading">
+              <div>
+                <p className="small-label">Jour sélectionné</p>
+                <h3>
+                  {selectedHistoryDateLabel.charAt(0).toUpperCase()}
+                  {selectedHistoryDateLabel.slice(1)}
+                </h3>
+              </div>
+
+              <span>{selectedHistoryTasks.length} terminée(s)</span>
+            </div>
+
+            {selectedHistoryTasks.length === 0 ? (
               <div className="empty-state">
                 <div className="empty-icon">
                   <History size={24} />
                 </div>
 
-                <h3>Aucun historique</h3>
+                <h3>Aucune tâche ce jour-là</h3>
 
-                <p>Les tâches terminées apparaîtront ici.</p>
+                <p>Les tâches terminées ce jour apparaîtront ici.</p>
               </div>
             ) : (
               <div className="history-list">
-                {Object.entries(groupedHistory).map(([date, dateTasks]) => (
-                  <div className="history-group" key={date}>
-                    <div className="history-date">{date}</div>
-
-                    {dateTasks.map((task) => (
-                      <TaskItem
-                        key={task.id}
-                        task={task}
-                        onToggle={toggleTask}
-                        onDelete={deleteTask}
-                        onEdit={editTask}
-                      />
-                    ))}
-                  </div>
+                {selectedHistoryTasks.map((task) => (
+                  <TaskItem
+                    key={task.id}
+                    task={task}
+                    onToggle={toggleTask}
+                    onDelete={deleteTask}
+                    onEdit={editTask}
+                  />
                 ))}
               </div>
             )}
@@ -692,7 +905,9 @@ function App() {
         )}
       </main>
 
-      {/* NAVIGATION */}
+      {/* =========================
+          NAVIGATION
+      ========================= */}
 
       <nav className="bottom-nav">
         <button
